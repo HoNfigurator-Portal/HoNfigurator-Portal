@@ -464,7 +464,7 @@
                 <!-- System Stats -->
                 <div class="bg-zinc-800/50 rounded-lg p-4 border border-zinc-800">
                     <h4 class="text-sm font-medium mb-3 text-zinc-400">System</h4>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
                         <div class="text-center">
                             <div class="text-xs text-zinc-500 mb-1">CPU</div>
                             <div class="text-xl font-medium" 
@@ -482,9 +482,16 @@
                                  x-text="formatUptime(statusData?.system_stats?.uptime_seconds || statusData?.systemStats?.uptimeSeconds)"></div>
                         </div>
                         <div class="text-center">
-                            <div class="text-xs text-zinc-500 mb-1">Players</div>
+                            <div class="text-xs text-zinc-500 mb-1">CPU Cores</div>
                             <div class="text-xl font-medium text-white"
-                                 x-text="statusData?.players_online || statusData?.playersOnline || 0"></div>
+                                 x-text="statusData?.system_stats?.cpu_count || statusData?.systemStats?.cpuCount || '-'"></div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-zinc-500 mb-1">Max @ 1/CPU</div>
+                            <div class="text-xl font-medium" 
+                                 :class="(statusData?.total_servers || statusData?.totalServers || 0) >= getMaxServers(statusData?.system_stats?.cpu_count || statusData?.systemStats?.cpuCount || 0) ? 'text-orange-400' : 'text-green-400'"
+                                 x-text="getMaxServers(statusData?.system_stats?.cpu_count || statusData?.systemStats?.cpuCount || 0) || '-'"></div>
+                            <div class="text-[10px] text-zinc-600" x-text="'(' + (statusData?.total_servers || statusData?.totalServers || 0) + ' running)'"></div>
                         </div>
                     </div>
                 </div>
@@ -2187,6 +2194,16 @@
                         return `${days}d ${hours % 24}h`;
                     }
                     return `${hours}h ${minutes}m`;
+                },
+
+                // Calculate max allowed servers based on CPU count (matching Python version)
+                // Reserves some CPUs for OS/Manager: <=4 cores: 1 reserved, 5-12: 2 reserved, >12: 4 reserved
+                getMaxServers(cpuCount, serversPerCore = 1) {
+                    if (!cpuCount || cpuCount <= 0) return 0;
+                    let reserved = 1;
+                    if (cpuCount > 4 && cpuCount <= 12) reserved = 2;
+                    else if (cpuCount > 12) reserved = 4;
+                    return Math.max(0, (cpuCount * serversPerCore) - reserved);
                 },
 
                 closeModals() {

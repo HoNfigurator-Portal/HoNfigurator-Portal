@@ -364,6 +364,9 @@ public class SystemStatsReport
     [JsonPropertyName("cpu_percent")]
     public double CpuPercent { get; set; }
     
+    [JsonPropertyName("cpu_count")]
+    public int CpuCount { get; set; }
+    
     [JsonPropertyName("memory_percent")]
     public double MemoryPercent { get; set; }
     
