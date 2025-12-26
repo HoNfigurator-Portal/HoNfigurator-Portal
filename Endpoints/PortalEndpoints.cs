@@ -15,6 +15,53 @@ public static class PortalEndpoints
         Timeout = TimeSpan.FromSeconds(30)
     };
 
+    /// <summary>
+    /// Helper: Check if user has access to a server with minimum required role
+    /// Returns the server if access granted, null otherwise
+    /// </summary>
+    private static async Task<(RegisteredServer? Server, ServerRole? Role, string? Error)> GetServerWithAccess(
+        PortalDbContext db,
+        PortalUser user,
+        string serverId,
+        ServerRole minimumRole = ServerRole.Viewer)
+    {
+        var server = await db.Servers.FirstOrDefaultAsync(s => s.ServerId == serverId);
+        if (server == null)
+        {
+            return (null, null, "Server not found");
+        }
+
+        // SuperAdmin has full access
+        if (user.IsSuperAdmin)
+        {
+            return (server, ServerRole.Owner, null);
+        }
+
+        // Check if original owner
+        if (server.OwnerId == user.Id)
+        {
+            return (server, ServerRole.Owner, null);
+        }
+
+        // Check shared access
+        var access = await db.ServerAccess
+            .FirstOrDefaultAsync(a => a.ServerId == server.Id 
+                && (a.DiscordId == user.DiscordId || a.UserId == user.Id));
+
+        if (access == null)
+        {
+            return (null, null, "Access denied");
+        }
+
+        // Check if role meets minimum requirement
+        if (access.Role < minimumRole)
+        {
+            return (null, access.Role, $"Insufficient permissions. Required: {minimumRole}, Your role: {access.Role}");
+        }
+
+        return (server, access.Role, null);
+    }
+
     public static void MapPortalEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api")
@@ -643,9 +690,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Viewer role can view server details
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Viewer);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         // Get cached status
         var status = statusService.GetStatus(serverId);
@@ -723,9 +770,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -735,15 +782,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} started instance {Instance} on {Server}", 
-                    user.Username, instanceId, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) started instance {Instance} on {Server}", 
+                    user.Username, role, instanceId, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("InstanceAction", serverId, instanceId, "started");
                 return Results.Ok(new { message = $"Instance {instanceId} started" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed to start: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed to start: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -766,9 +813,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -778,15 +825,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} stopped instance {Instance} on {Server}", 
-                    user.Username, instanceId, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) stopped instance {Instance} on {Server}", 
+                    user.Username, role, instanceId, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("InstanceAction", serverId, instanceId, "stopped");
                 return Results.Ok(new { message = $"Instance {instanceId} stopped" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed to stop: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed to stop: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -809,8 +856,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
         if (server == null) return Results.NotFound(new { error = "Server not found" });
 
         try
@@ -821,15 +869,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} restarted instance {Instance} on {Server}", 
-                    user.Username, instanceId, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) restarted instance {Instance} on {Server}", 
+                    user.Username, role, instanceId, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("InstanceAction", serverId, instanceId, "restarted");
                 return Results.Ok(new { message = $"Instance {instanceId} restarted" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed to restart: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed to restart: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -851,9 +899,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -863,15 +911,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} started all instances on {Server}", 
-                    user.Username, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) started all instances on {Server}", 
+                    user.Username, role, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("BulkAction", serverId, "started-all");
                 return Results.Ok(new { message = "All instances started" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -893,9 +941,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -905,15 +953,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} stopped all instances on {Server}", 
-                    user.Username, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) stopped all instances on {Server}", 
+                    user.Username, role, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("BulkAction", serverId, "stopped-all");
                 return Results.Ok(new { message = "All instances stopped" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -935,9 +983,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to start/stop instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -947,15 +995,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} restarted all instances on {Server}", 
-                    user.Username, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) restarted all instances on {Server}", 
+                    user.Username, role, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("BulkAction", serverId, "restarted-all");
                 return Results.Ok(new { message = "All instances restarted" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -978,9 +1026,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Admin role required to scale instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -990,15 +1038,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} scaled to {Target} instances on {Server}", 
-                    user.Username, request.TargetCount, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) scaled to {Target} instances on {Server}", 
+                    user.Username, role, request.TargetCount, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("BulkAction", serverId, "scaled");
                 return Results.Ok(new { message = $"Scaled to {request.TargetCount} instances" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1020,9 +1068,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Admin role required to add/delete instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1039,8 +1087,8 @@ public static class PortalEndpoints
                 return Results.Ok(new { message = "Instance added" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1063,9 +1111,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Admin role required to add/delete instances
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1075,15 +1123,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} deleted instance {Instance} on {Server}", 
-                    user.Username, instanceId, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) deleted instance {Instance} on {Server}", 
+                    user.Username, role, instanceId, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("InstanceAction", serverId, instanceId, "deleted");
                 return Results.Ok(new { message = $"Instance {instanceId} deleted" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1106,9 +1154,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Operator role required to broadcast messages
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Operator);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1118,15 +1166,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} broadcast message on {Server}: {Message}", 
-                    user.Username, server.ServerName, request.Message);
+                logger.LogInformation("User {User} ({Role}) broadcast message on {Server}: {Message}", 
+                    user.Username, role, server.ServerName, request.Message);
                 
                 await hubContext.Clients.All.SendAsync("BroadcastSent", serverId, request.Message);
                 return Results.Ok(new { message = "Broadcast sent" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1147,9 +1195,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Viewer role can view config
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Viewer);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1162,8 +1210,8 @@ public static class PortalEndpoints
                 return Results.Content(json, "application/json");
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed to get config: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed to get config: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1186,9 +1234,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Admin role required to update config
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1213,15 +1261,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} updated config on {Server}: {Config}", 
-                    user.Username, server.ServerName, System.Text.Json.JsonSerializer.Serialize(configPayload));
+                logger.LogInformation("User {User} ({Role}) updated config on {Server}: {Config}", 
+                    user.Username, role, server.ServerName, System.Text.Json.JsonSerializer.Serialize(configPayload));
                 
                 await hubContext.Clients.All.SendAsync("ConfigUpdated", serverId);
                 return Results.Ok(new { message = "Configuration updated successfully" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
@@ -1244,9 +1292,9 @@ public static class PortalEndpoints
         var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
         if (user == null) return Results.Unauthorized();
 
-        var server = await db.Servers
-            .FirstOrDefaultAsync(s => s.ServerId == serverId && s.OwnerId == user.Id);
-        if (server == null) return Results.NotFound(new { error = "Server not found" });
+        // Admin role required to update full config
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (server == null) return Results.NotFound(new { error = error ?? "Server not found" });
 
         try
         {
@@ -1261,15 +1309,15 @@ public static class PortalEndpoints
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("User {User} updated full config on {Server}", 
-                    user.Username, server.ServerName);
+                logger.LogInformation("User {User} ({Role}) updated full config on {Server}", 
+                    user.Username, role, server.ServerName);
                 
                 await hubContext.Clients.All.SendAsync("ConfigUpdated", serverId);
                 return Results.Ok(new { message = "Full configuration updated successfully" });
             }
 
-            var error = await response.Content.ReadAsStringAsync();
-            return Results.BadRequest(new { error = $"Failed: {error}" });
+            var errorMsg = await response.Content.ReadAsStringAsync();
+            return Results.BadRequest(new { error = $"Failed: {errorMsg}" });
         }
         catch (Exception ex)
         {
