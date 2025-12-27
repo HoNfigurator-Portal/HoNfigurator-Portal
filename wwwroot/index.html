@@ -354,6 +354,12 @@
                     Instances
                     <span class="px-1.5 py-0.5 text-xs bg-zinc-800 rounded" x-text="(statusData?.instances?.length || 0)"></span>
                 </button>
+                <button @click="activeTab = 'replays'; loadReplays()" 
+                        :class="activeTab === 'replays' ? 'border-orange-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'"
+                        class="px-4 py-3 border-b-2 text-sm transition-colors flex items-center gap-2">
+                    <i class="fas fa-film"></i> Replays
+                    <span class="px-1.5 py-0.5 text-xs bg-zinc-800 rounded" x-text="replays.length"></span>
+                </button>
                 <button @click="activeTab = 'config'" 
                         :class="activeTab === 'config' ? 'border-orange-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'"
                         class="px-4 py-3 border-b-2 text-sm transition-colors">Config</button>
@@ -652,6 +658,86 @@
                         <i class="fas fa-plus mr-2"></i>Add Instance
                     </button>
                 </div>
+                </div>
+
+                <!-- ==================== REPLAYS TAB ==================== -->
+                <div x-show="activeTab === 'replays'">
+                    <!-- Replay Stats -->
+                    <div class="bg-zinc-800/50 rounded-lg p-4 mb-4 border border-zinc-800">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="text-sm font-medium text-zinc-400">
+                                <i class="fas fa-film mr-2"></i>Game Replays
+                            </h4>
+                            <button @click="loadReplays()" :disabled="replaysLoading"
+                                    class="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-xs transition-colors disabled:opacity-50">
+                                <i class="fas fa-sync-alt" :class="replaysLoading ? 'fa-spin' : ''"></i>
+                                <span class="ml-1">Refresh</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Stats Summary -->
+                        <div class="grid grid-cols-3 gap-4 mb-4" x-show="replayStats">
+                            <div class="bg-zinc-900 rounded p-3 text-center">
+                                <div class="text-xl font-bold text-orange-400" x-text="replayStats?.totalReplays || 0"></div>
+                                <div class="text-xs text-zinc-500">Total Replays</div>
+                            </div>
+                            <div class="bg-zinc-900 rounded p-3 text-center">
+                                <div class="text-xl font-bold text-blue-400" x-text="replayStats?.totalSizeFormatted || '0 B'"></div>
+                                <div class="text-xs text-zinc-500">Total Size</div>
+                            </div>
+                            <div class="bg-zinc-900 rounded p-3 text-center">
+                                <div class="text-xl font-bold text-green-400" x-text="replayStats?.archivedReplays || 0"></div>
+                                <div class="text-xs text-zinc-500">Archived</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Loading State -->
+                        <div x-show="replaysLoading" class="text-center py-8">
+                            <i class="fas fa-spinner fa-spin text-2xl text-zinc-500"></i>
+                            <p class="text-zinc-500 mt-2">Loading replays...</p>
+                        </div>
+                        
+                        <!-- Empty State -->
+                        <div x-show="!replaysLoading && replays.length === 0" class="text-center py-8">
+                            <i class="fas fa-film text-4xl text-zinc-700"></i>
+                            <p class="text-zinc-500 mt-2">No replays found</p>
+                        </div>
+                        
+                        <!-- Replays Table -->
+                        <div x-show="!replaysLoading && replays.length > 0" class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-zinc-500 border-b border-zinc-700">
+                                        <th class="pb-2 font-medium">Match ID</th>
+                                        <th class="pb-2 font-medium">Date</th>
+                                        <th class="pb-2 font-medium">Size</th>
+                                        <th class="pb-2 font-medium text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="replay in replays" :key="replay.filename">
+                                        <tr class="border-b border-zinc-800 hover:bg-zinc-800/50">
+                                            <td class="py-2">
+                                                <span class="text-orange-400 font-mono" x-text="replay.matchId"></span>
+                                            </td>
+                                            <td class="py-2 text-zinc-400" x-text="replay.date"></td>
+                                            <td class="py-2 text-zinc-400" x-text="replay.size"></td>
+                                            <td class="py-2 text-right">
+                                                <button @click="downloadReplay(replay.filename)"
+                                                        class="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs mr-1">
+                                                    <i class="fas fa-download"></i>
+                                                </button>
+                                                <button @click="deleteReplay(replay.filename)"
+                                                        class="px-2 py-1 bg-red-600 hover:bg-red-500 rounded text-xs">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- ==================== CONFIGURATION TAB ==================== -->
@@ -1345,6 +1431,11 @@
                     discordId: '',
                     role: 0
                 },
+                
+                // Replays
+                replays: [],
+                replayStats: null,
+                replaysLoading: false,
                 
                 // Server Manager Settings
                 targetServers: 1,
@@ -2374,6 +2465,71 @@
                         apiPort: 5050,
                         region: 'Unknown'
                     };
+                },
+
+                // ==================== REPLAYS MANAGEMENT ====================
+                async loadReplays() {
+                    if (!this.selectedServer) return;
+                    
+                    this.replaysLoading = true;
+                    try {
+                        // Load replays list
+                        const res = await this.apiCall(`/api/servers/${this.selectedServer.serverId}/replays`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.replays = data.replays || [];
+                        }
+                        
+                        // Load replay stats
+                        const statsRes = await this.apiCall(`/api/servers/${this.selectedServer.serverId}/replays/stats`);
+                        if (statsRes.ok) {
+                            this.replayStats = await statsRes.json();
+                        }
+                    } catch (err) {
+                        console.error('Failed to load replays:', err);
+                    } finally {
+                        this.replaysLoading = false;
+                    }
+                },
+
+                async downloadReplay(filename) {
+                    if (!this.selectedServer) return;
+                    
+                    try {
+                        const res = await this.apiCall(`/api/servers/${this.selectedServer.serverId}/replays/download/${filename}`);
+                        if (res.ok) {
+                            const blob = await res.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = filename;
+                            document.body.appendChild(a);
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                            a.remove();
+                        } else {
+                            alert('Failed to download replay');
+                        }
+                    } catch (err) {
+                        alert('Network error');
+                    }
+                },
+
+                async deleteReplay(filename) {
+                    if (!confirm(`Delete replay ${filename}?`)) return;
+                    
+                    try {
+                        const res = await this.apiCall(`/api/servers/${this.selectedServer.serverId}/replays/${filename}`, {
+                            method: 'DELETE'
+                        });
+                        if (res.ok) {
+                            await this.loadReplays();
+                        } else {
+                            alert('Failed to delete replay');
+                        }
+                    } catch (err) {
+                        alert('Network error');
+                    }
                 },
 
                 // ==================== ACCESS MANAGEMENT ====================

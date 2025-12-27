@@ -157,6 +157,23 @@ public static class PortalEndpoints
             .WithName("UpdateServerConfigFull")
             .WithDescription("Update full server configuration");
 
+        // Replays Management
+        group.MapGet("/servers/{serverId}/replays", GetReplays)
+            .WithName("GetReplays")
+            .WithDescription("Get list of replays from server");
+
+        group.MapGet("/servers/{serverId}/replays/stats", GetReplayStats)
+            .WithName("GetReplayStats")
+            .WithDescription("Get replay statistics from server");
+
+        group.MapGet("/servers/{serverId}/replays/download/{filename}", DownloadReplay)
+            .WithName("DownloadReplay")
+            .WithDescription("Download a replay file");
+
+        group.MapDelete("/servers/{serverId}/replays/{filename}", DeleteReplayFile)
+            .WithName("DeleteReplayFile")
+            .WithDescription("Delete a replay file");
+
         // Health check (public)
         group.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }))
             .WithName("HealthCheck");
@@ -1690,5 +1707,168 @@ public static class PortalEndpoints
             access.DiscordId, server.ServerName);
 
         return Results.Ok(new { message = "Access removed successfully" });
+    }
+
+    // ==================== REPLAYS MANAGEMENT ====================
+
+    /// <summary>
+    /// Get list of replays from a server
+    /// </summary>
+    private static async Task<IResult> GetReplays(
+        string serverId,
+        HttpContext httpContext,
+        PortalDbContext db,
+        IHttpClientFactory httpClientFactory,
+        ILogger<Program> logger)
+    {
+        var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
+        if (user == null) return Results.Unauthorized();
+
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Viewer);
+        if (error != null) return Results.Json(new { error, replays = Array.Empty<object>() });
+
+        try
+        {
+            var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Api-Key", server!.ApiKey);
+            client.Timeout = TimeSpan.FromSeconds(30);
+
+            var response = await client.GetAsync($"http://{server.IpAddress}:{server.ApiPort}/api/replays");
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return Results.Json(new { error = "Failed to get replays", replays = Array.Empty<object>() });
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var data = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(content);
+            
+            return Results.Ok(data);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get replays from server {ServerId}", serverId);
+            return Results.Json(new { error = ex.Message, replays = Array.Empty<object>() });
+        }
+    }
+
+    /// <summary>
+    /// Get replay statistics from a server
+    /// </summary>
+    private static async Task<IResult> GetReplayStats(
+        string serverId,
+        HttpContext httpContext,
+        PortalDbContext db,
+        IHttpClientFactory httpClientFactory,
+        ILogger<Program> logger)
+    {
+        var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
+        if (user == null) return Results.Unauthorized();
+
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Viewer);
+        if (error != null) return Results.Json(new { error });
+
+        try
+        {
+            var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Api-Key", server!.ApiKey);
+            client.Timeout = TimeSpan.FromSeconds(30);
+
+            var response = await client.GetAsync($"http://{server.IpAddress}:{server.ApiPort}/api/replays/manage/stats");
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return Results.Json(new { error = "Failed to get replay stats" });
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var data = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(content);
+            
+            return Results.Ok(data);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get replay stats from server {ServerId}", serverId);
+            return Results.Json(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Download a replay file from a server
+    /// </summary>
+    private static async Task<IResult> DownloadReplay(
+        string serverId,
+        string filename,
+        HttpContext httpContext,
+        PortalDbContext db,
+        IHttpClientFactory httpClientFactory,
+        ILogger<Program> logger)
+    {
+        var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
+        if (user == null) return Results.Unauthorized();
+
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Viewer);
+        if (error != null) return Results.NotFound(new { error });
+
+        try
+        {
+            var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Api-Key", server!.ApiKey);
+            client.Timeout = TimeSpan.FromMinutes(5); // Longer timeout for file downloads
+
+            var response = await client.GetAsync($"http://{server.IpAddress}:{server.ApiPort}/api/replays/download/{filename}");
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return Results.NotFound(new { error = "Replay not found" });
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            return Results.File(bytes, "application/octet-stream", filename);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to download replay {Filename} from server {ServerId}", filename, serverId);
+            return Results.Json(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Delete a replay file from a server
+    /// </summary>
+    private static async Task<IResult> DeleteReplayFile(
+        string serverId,
+        string filename,
+        HttpContext httpContext,
+        PortalDbContext db,
+        IHttpClientFactory httpClientFactory,
+        ILogger<Program> logger)
+    {
+        var user = await AuthEndpoints.GetAuthenticatedUser(httpContext, db);
+        if (user == null) return Results.Unauthorized();
+
+        var (server, role, error) = await GetServerWithAccess(db, user, serverId, ServerRole.Admin);
+        if (error != null) return Results.Json(new { error });
+
+        try
+        {
+            var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Api-Key", server!.ApiKey);
+            client.Timeout = TimeSpan.FromSeconds(30);
+
+            var response = await client.DeleteAsync($"http://{server.IpAddress}:{server.ApiPort}/api/replays/manage/{filename}");
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return Results.Json(new { error = "Failed to delete replay" });
+            }
+
+            return Results.Ok(new { message = "Replay deleted successfully" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to delete replay {Filename} from server {ServerId}", filename, serverId);
+            return Results.Json(new { error = ex.Message });
+        }
     }
 }
