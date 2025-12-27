@@ -42,6 +42,7 @@ builder.Services.AddDbContext<PortalDbContext>(options =>
 // Services
 builder.Services.AddSingleton<ServerStatusService>();
 builder.Services.AddHostedService<ServerCleanupService>();
+builder.Services.AddHttpClient(); // For proxying requests to game servers
 
 // SignalR for real-time updates
 builder.Services.AddSignalR();
@@ -91,15 +92,25 @@ using (var scope = app.Services.CreateScope())
         await db.Database.ExecuteSqlRawAsync(@"
             CREATE INDEX IF NOT EXISTS IX_ServerAccess_UserId 
             ON ServerAccess (UserId)");
-            
+    }
+    catch (Exception ex) { Console.WriteLine($"Note: Table creation: {ex.Message}"); }
+
+    /*
+    try
+    {
         // Add IsSuperAdmin column to Users table if not exists
         await db.Database.ExecuteSqlRawAsync(@"
             ALTER TABLE Users ADD COLUMN IsSuperAdmin INTEGER NOT NULL DEFAULT 0");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Note: Database migration: {ex.Message}");
+        // Ignore duplicate column error
+        if (!ex.Message.Contains("duplicate column name"))
+        {
+            Console.WriteLine($"Note: Column migration: {ex.Message}");
+        }
     }
+    */
 }
 
 // Configure pipeline
