@@ -2592,7 +2592,6 @@
                                     <div class="text-orange-400 font-medium mb-1">Other</div>
                                     <div class="text-zinc-400 space-y-0.5">
                                         <div><code class="text-green-400">say [msg]</code> - Broadcast to all</div>
-                                        <div><code class="text-green-400">say [id] [msg]</code> - To instance</div>
                                         <div><code class="text-green-400">help</code> - Show this help</div>
                                         <div><code class="text-green-400">clear</code> - Clear console</div>
                                         <div><code class="text-green-400">refresh</code> - Refresh data</div>
@@ -6195,24 +6194,23 @@
                     const match = fullCmd.match(/^(?:say|broadcast)\s+(?:(\d+)\s+)?(.+)$/i);
                     
                     if (!match || !match[2]) {
-                        this.addConsoleLog('Usage: say [message] or say [id] [message]', 'warning');
+                        this.addConsoleLog('Usage: say [message]', 'warning');
                         this.addConsoleLog('Example: say Hello everyone!', 'info');
-                        this.addConsoleLog('Example: say 1 Hello instance 1!', 'info');
                         return;
                     }
                     
                     const instanceId = match[1] ? parseInt(match[1]) : null;
                     const message = match[2];
                     
-                    let endpoint = `/api/servers/${this.selectedServer.serverId}/broadcast`;
-                    let body = { message };
-                    
+                    // Note: Per-instance broadcast not yet implemented in API
                     if (instanceId) {
-                        endpoint = `/api/servers/${this.selectedServer.serverId}/instances/${instanceId}/broadcast`;
-                        this.addConsoleLog(`Broadcasting to instance #${instanceId}: "${message}"`, 'info');
-                    } else {
-                        this.addConsoleLog(`Broadcasting to all: "${message}"`, 'info');
+                        this.addConsoleLog(`⚠ Per-instance broadcast not supported yet. Broadcasting to all instead.`, 'warning');
                     }
+                    
+                    const endpoint = `/api/servers/${this.selectedServer.serverId}/broadcast`;
+                    const body = { message };
+                    
+                    this.addConsoleLog(`Broadcasting to all: "${message}"`, 'info');
                     
                     const res = await this.apiCall(endpoint, {
                         method: 'POST',
@@ -6222,7 +6220,8 @@
                     if (res.ok) {
                         this.addConsoleLog('✓ Message sent', 'success');
                     } else {
-                        this.addConsoleLog('✗ Failed to send message', 'error');
+                        const err = await res.json().catch(() => ({}));
+                        this.addConsoleLog(`✗ Failed to send message: ${err.error || 'Unknown error'}`, 'error');
                     }
                 },
 
