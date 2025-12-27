@@ -792,19 +792,32 @@
                                         <td class="py-2 text-xs text-zinc-500" x-text="formatInstanceUptime(instance.start_time || instance.startTime)"></td>
                                         <td class="py-2 pr-2">
                                             <div class="flex items-center gap-1 justify-end">
+                                                <!-- Sleep Status Badge -->
+                                                <template x-if="isSleeping(instance.id)">
+                                                    <div class="flex items-center gap-1 mr-1">
+                                                        <span class="px-2 py-0.5 bg-blue-600/30 border border-blue-500/50 rounded text-xs text-blue-400 animate-pulse flex items-center gap-1"
+                                                              :title="getSleepStatus(instance.id)">
+                                                            <i class="fas fa-moon"></i>
+                                                            <span x-text="sleepingInstances[instance.id]?.pendingAction === 'stop' ? 'Stopping' : 'Restarting'"></span>
+                                                        </span>
+                                                        <button @click="cancelSleep(instance.id)" class="w-5 h-5 bg-zinc-700 hover:bg-red-600 rounded flex items-center justify-center text-xs" title="Cancel Sleep">
+                                                            <i class="fas fa-times"></i>
+                                                        </button>
+                                                    </div>
+                                                </template>
                                                 <button @click="startInstance(instance.id)" :disabled="isStartDisabled(instance)"
                                                         class="w-6 h-6 bg-zinc-700 hover:bg-green-600 rounded flex items-center justify-center text-xs transition-colors disabled:opacity-30">
                                                     <i class="fas fa-play"></i>
                                                 </button>
-                                                <button @click="stopInstance(instance.id)" :disabled="isStopDisabled(instance)"
+                                                <button @click="stopInstance(instance.id)" :disabled="isStopDisabled(instance) || isSleeping(instance.id)"
                                                         class="w-6 h-6 bg-zinc-700 hover:bg-red-600 rounded flex items-center justify-center text-xs transition-colors disabled:opacity-30">
                                                     <i class="fas fa-stop"></i>
                                                 </button>
-                                                <button @click="restartInstance(instance.id)" :disabled="controlLoading"
+                                                <button @click="restartInstance(instance.id)" :disabled="isRestartDisabled(instance) || isSleeping(instance.id)"
                                                         class="w-6 h-6 bg-zinc-700 hover:bg-orange-600 rounded flex items-center justify-center text-xs transition-colors disabled:opacity-30">
                                                     <i class="fas fa-sync-alt"></i>
                                                 </button>
-                                                <button @click="deleteInstance(instance.id)" :disabled="controlLoading"
+                                                <button @click="deleteInstance(instance.id)" :disabled="controlLoading || isSleeping(instance.id)"
                                                         class="w-6 h-6 bg-zinc-700 hover:bg-zinc-600 rounded flex items-center justify-center text-xs transition-colors disabled:opacity-30">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
@@ -819,11 +832,18 @@
                     <!-- Grid View -->
                     <div x-show="instanceViewMode === 'grid' && filteredInstances.length" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                         <template x-for="instance in sortedInstances" :key="instance.id">
-                            <div class="bg-zinc-900 rounded p-3 border border-zinc-800 hover:border-zinc-700 transition-colors">
+                            <div class="bg-zinc-900 rounded p-3 border border-zinc-800 hover:border-zinc-700 transition-colors" :class="{'border-blue-500/50': isSleeping(instance.id)}">
                                 <div class="flex items-center gap-2 mb-2">
                                     <span class="w-2 h-2 rounded-full" :class="getStatusDotClass(instance)"></span>
                                     <span class="text-sm" x-text="'#' + instance.id"></span>
                                     <span class="text-xs text-zinc-500" x-text="instance.status || 'Unknown'"></span>
+                                    <!-- Sleep Badge -->
+                                    <template x-if="isSleeping(instance.id)">
+                                        <span class="ml-auto px-2 py-0.5 bg-blue-600/30 border border-blue-500/50 rounded text-xs text-blue-400 animate-pulse flex items-center gap-1">
+                                            <i class="fas fa-moon"></i>
+                                            <span x-text="sleepingInstances[instance.id]?.pendingAction === 'stop' ? 'Sleeping' : 'Restarting'"></span>
+                                        </span>
+                                    </template>
                                 </div>
                                 <div class="text-xs text-zinc-500 space-y-1 mb-3">
                                     <div class="flex justify-between">
@@ -838,20 +858,39 @@
                                         <span>Phase</span>
                                         <span class="text-zinc-400" x-text="instance.game_phase || instance.gamePhase || 'Idle'"></span>
                                     </div>
+                                    <!-- Sleep Status -->
+                                    <template x-if="isSleeping(instance.id)">
+                                        <div class="flex justify-between text-blue-400">
+                                            <span>Status</span>
+                                            <span x-text="getSleepStatus(instance.id)"></span>
+                                        </div>
+                                    </template>
                                 </div>
                                 <div class="flex items-center gap-1">
-                                    <button @click="startInstance(instance.id)" :disabled="isStartDisabled(instance)"
-                                            class="flex-1 h-7 bg-zinc-800 hover:bg-green-600 rounded text-xs transition-colors disabled:opacity-30">
-                                        <i class="fas fa-play"></i>
-                                    </button>
-                                    <button @click="stopInstance(instance.id)" :disabled="isStopDisabled(instance)"
-                                            class="flex-1 h-7 bg-zinc-800 hover:bg-red-600 rounded text-xs transition-colors disabled:opacity-30">
-                                        <i class="fas fa-stop"></i>
-                                    </button>
-                                    <button @click="restartInstance(instance.id)" :disabled="controlLoading"
-                                            class="flex-1 h-7 bg-zinc-800 hover:bg-orange-600 rounded text-xs transition-colors disabled:opacity-30">
-                                        <i class="fas fa-sync-alt"></i>
-                                    </button>
+                                    <template x-if="isSleeping(instance.id)">
+                                        <button @click="cancelSleep(instance.id)"
+                                                class="flex-1 h-7 bg-red-800 hover:bg-red-600 rounded text-xs transition-colors">
+                                            <i class="fas fa-times mr-1"></i>Cancel
+                                        </button>
+                                    </template>
+                                    <template x-if="!isSleeping(instance.id)">
+                                        <button @click="startInstance(instance.id)" :disabled="isStartDisabled(instance)"
+                                                class="flex-1 h-7 bg-zinc-800 hover:bg-green-600 rounded text-xs transition-colors disabled:opacity-30">
+                                            <i class="fas fa-play"></i>
+                                        </button>
+                                    </template>
+                                    <template x-if="!isSleeping(instance.id)">
+                                        <button @click="stopInstance(instance.id)" :disabled="isStopDisabled(instance)"
+                                                class="flex-1 h-7 bg-zinc-800 hover:bg-red-600 rounded text-xs transition-colors disabled:opacity-30">
+                                            <i class="fas fa-stop"></i>
+                                        </button>
+                                    </template>
+                                    <template x-if="!isSleeping(instance.id)">
+                                        <button @click="restartInstance(instance.id)" :disabled="isRestartDisabled(instance)"
+                                                class="flex-1 h-7 bg-zinc-800 hover:bg-orange-600 rounded text-xs transition-colors disabled:opacity-30">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                    </template>
                                 </div>
                             </div>
                         </template>
@@ -1481,6 +1520,168 @@
                                             x-show="crashHistory.length > 0"
                                             class="w-full py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-xs transition-colors">
                                         <i class="fas fa-trash mr-1"></i>Clear History
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Safe Mode / Player Protection -->
+                        <div class="bg-zinc-800/50 rounded-lg p-4 border border-zinc-800 md:col-span-2">
+                            <div class="flex items-center justify-between mb-4">
+                                <h4 class="text-sm font-medium text-zinc-400">
+                                    <i class="fas fa-user-shield mr-2 text-blue-400"></i>Player Protection (Safe Mode)
+                                </h4>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-xs" :class="safeMode.enabled ? 'text-blue-400' : 'text-zinc-500'">
+                                        <i class="fas fa-circle text-[8px] mr-1" :class="safeMode.enabled ? 'animate-pulse' : ''"></i>
+                                        <span x-text="safeMode.enabled ? 'Protected' : 'Disabled'"></span>
+                                    </span>
+                                    <span x-show="Object.keys(sleepingInstances).length > 0" 
+                                          class="text-xs px-2 py-0.5 bg-blue-600/30 border border-blue-500/50 rounded text-blue-400">
+                                        <i class="fas fa-moon mr-1"></i>
+                                        <span x-text="Object.keys(sleepingInstances).length + ' sleeping'"></span>
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <p class="text-sm text-zinc-500 mb-4">
+                                <i class="fas fa-info-circle text-blue-400 mr-1"></i>
+                                Protect players by preventing accidental server stops/restarts while games are active.
+                            </p>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <!-- Settings -->
+                                <div class="space-y-4">
+                                    <h5 class="text-xs font-medium text-zinc-500 uppercase tracking-wider">Settings</h5>
+                                    
+                                    <!-- Enable Safe Mode -->
+                                    <div class="flex items-center justify-between bg-zinc-900 rounded p-3">
+                                        <div>
+                                            <span class="text-sm">Enable Safe Mode</span>
+                                            <p class="text-xs text-zinc-500">Prevent actions when players are in-game</p>
+                                        </div>
+                                        <button @click="safeMode.enabled = !safeMode.enabled"
+                                                :class="safeMode.enabled ? 'bg-blue-600' : 'bg-zinc-700'"
+                                                class="relative w-12 h-6 rounded-full transition-colors">
+                                            <span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-all"
+                                                  :class="safeMode.enabled ? 'left-7' : 'left-1'"></span>
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Require Confirmation -->
+                                    <div class="flex items-center justify-between bg-zinc-900 rounded p-3">
+                                        <div>
+                                            <span class="text-sm">Require Confirmation</span>
+                                            <p class="text-xs text-zinc-500">Show warning dialog before force actions</p>
+                                        </div>
+                                        <button @click="safeMode.requireConfirmation = !safeMode.requireConfirmation"
+                                                :class="safeMode.requireConfirmation ? 'bg-blue-600' : 'bg-zinc-700'"
+                                                class="relative w-12 h-6 rounded-full transition-colors"
+                                                :disabled="!safeMode.enabled">
+                                            <span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-all"
+                                                  :class="safeMode.requireConfirmation ? 'left-7' : 'left-1'"></span>
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Auto Execute When Empty -->
+                                    <div class="flex items-center justify-between bg-zinc-900 rounded p-3">
+                                        <div>
+                                            <span class="text-sm">Auto-Execute When Empty</span>
+                                            <p class="text-xs text-zinc-500">Run pending action when players leave</p>
+                                        </div>
+                                        <button @click="safeMode.autoRestartWhenEmpty = !safeMode.autoRestartWhenEmpty"
+                                                :class="safeMode.autoRestartWhenEmpty ? 'bg-blue-600' : 'bg-zinc-700'"
+                                                class="relative w-12 h-6 rounded-full transition-colors"
+                                                :disabled="!safeMode.enabled">
+                                            <span class="absolute top-1 w-4 h-4 bg-white rounded-full transition-all"
+                                                  :class="safeMode.autoRestartWhenEmpty ? 'left-7' : 'left-1'"></span>
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Detection Mode -->
+                                    <div class="bg-zinc-900 rounded p-3">
+                                        <span class="text-sm block mb-2">Detection Mode</span>
+                                        <div class="space-y-2">
+                                            <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+                                                <input type="radio" name="detectionMode" value="players" 
+                                                       :checked="!safeMode.strictMode"
+                                                       @change="safeMode.strictMode = false"
+                                                       class="text-blue-500 focus:ring-blue-500"
+                                                       :disabled="!safeMode.enabled">
+                                                <span><strong>Players Online</strong> - Protect when num_clients > 0</span>
+                                            </label>
+                                            <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+                                                <input type="radio" name="detectionMode" value="game" 
+                                                       :checked="safeMode.strictMode"
+                                                       @change="safeMode.strictMode = true"
+                                                       class="text-blue-500 focus:ring-blue-500"
+                                                       :disabled="!safeMode.enabled">
+                                                <span><strong>Game Active</strong> - Only during active game phase</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Sleeping Instances -->
+                                <div class="space-y-4">
+                                    <div class="flex items-center justify-between">
+                                        <h5 class="text-xs font-medium text-zinc-500 uppercase tracking-wider">Sleeping Instances</h5>
+                                        <button @click="checkSleepingInstances()" class="text-xs text-zinc-500 hover:text-white">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Summary -->
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div class="bg-zinc-900 rounded p-3 text-center">
+                                            <div class="text-lg font-bold text-blue-400" x-text="Object.keys(sleepingInstances).length"></div>
+                                            <div class="text-xs text-zinc-500">Sleeping</div>
+                                        </div>
+                                        <div class="bg-zinc-900 rounded p-3 text-center">
+                                            <div class="text-lg font-bold text-green-400" x-text="statusData?.instances?.filter(i => !hasActivePlayers(i)).length || 0"></div>
+                                            <div class="text-xs text-zinc-500">Empty</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Sleeping List -->
+                                    <div class="bg-zinc-900 rounded max-h-[220px] overflow-y-auto">
+                                        <template x-if="Object.keys(sleepingInstances).length === 0">
+                                            <div class="p-4 text-center text-zinc-500 text-sm">
+                                                <i class="fas fa-check-circle text-2xl text-green-500 mb-2"></i>
+                                                <p>No sleeping instances</p>
+                                                <p class="text-xs">All actions executed immediately</p>
+                                            </div>
+                                        </template>
+                                        <template x-for="(info, instanceId) in sleepingInstances" :key="instanceId">
+                                            <div class="p-3 border-b border-zinc-800 last:border-0 hover:bg-zinc-800/50">
+                                                <div class="flex items-start justify-between">
+                                                    <div class="flex items-center gap-2">
+                                                        <i class="fas fa-moon text-blue-400 animate-pulse"></i>
+                                                        <div>
+                                                            <span class="text-sm font-medium" x-text="'Instance #' + instanceId"></span>
+                                                            <span class="text-xs px-1.5 py-0.5 rounded ml-2"
+                                                                  :class="info.pendingAction === 'stop' ? 'bg-red-500/20 text-red-400' : 'bg-orange-500/20 text-orange-400'"
+                                                                  x-text="info.pendingAction === 'stop' ? 'Stopping' : 'Restarting'"></span>
+                                                        </div>
+                                                    </div>
+                                                    <button @click="cancelSleep(instanceId)" 
+                                                            class="text-xs px-2 py-1 bg-red-600 hover:bg-red-500 rounded">
+                                                        <i class="fas fa-times mr-1"></i>Cancel
+                                                    </button>
+                                                </div>
+                                                <p class="text-xs text-zinc-500 mt-1 pl-6">
+                                                    <i class="fas fa-clock mr-1"></i>
+                                                    Waiting since <span x-text="new Date(info.waitingSince).toLocaleTimeString()"></span>
+                                                </p>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    
+                                    <!-- Cancel All -->
+                                    <button @click="Object.keys(sleepingInstances).forEach(id => cancelSleep(id))" 
+                                            x-show="Object.keys(sleepingInstances).length > 0"
+                                            class="w-full py-2 bg-red-700 hover:bg-red-600 rounded text-xs transition-colors">
+                                        <i class="fas fa-times mr-1"></i>Cancel All Sleeping
                                     </button>
                                 </div>
                             </div>
@@ -2370,6 +2571,15 @@
                                     </div>
                                 </div>
                                 <div>
+                                    <div class="text-orange-400 font-medium mb-1">Safe Mode</div>
+                                    <div class="text-zinc-400 space-y-0.5">
+                                        <div><code class="text-blue-400">sleep [id] stop</code> - Queue stop</div>
+                                        <div><code class="text-blue-400">sleep [id] restart</code> - Queue restart</div>
+                                        <div><code class="text-blue-400">wake [id]</code> - Cancel sleep</div>
+                                        <div><code class="text-blue-400">sleeping</code> - List sleeping</div>
+                                    </div>
+                                </div>
+                                <div>
                                     <div class="text-orange-400 font-medium mb-1">Information</div>
                                     <div class="text-zinc-400 space-y-0.5">
                                         <div><code class="text-green-400">status</code> - Show all status</div>
@@ -2379,15 +2589,10 @@
                                     </div>
                                 </div>
                                 <div>
-                                    <div class="text-orange-400 font-medium mb-1">Broadcast</div>
+                                    <div class="text-orange-400 font-medium mb-1">Other</div>
                                     <div class="text-zinc-400 space-y-0.5">
                                         <div><code class="text-green-400">say [msg]</code> - Broadcast to all</div>
                                         <div><code class="text-green-400">say [id] [msg]</code> - To instance</div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="text-orange-400 font-medium mb-1">Other</div>
-                                    <div class="text-zinc-400 space-y-0.5">
                                         <div><code class="text-green-400">help</code> - Show this help</div>
                                         <div><code class="text-green-400">clear</code> - Clear console</div>
                                         <div><code class="text-green-400">refresh</code> - Refresh data</div>
@@ -2673,6 +2878,83 @@
                 <button @click="addRole()"
                         class="flex-1 px-3 py-2 bg-orange-500 hover:bg-orange-600 rounded text-sm font-medium transition-colors">
                     Create
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Safe Mode Warning Modal -->
+    <div x-show="showSafeModeModal" x-cloak
+         class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+         @click.self="showSafeModeModal = false">
+        <div class="bg-zinc-900 rounded-lg w-full max-w-md border border-zinc-800">
+            <div class="p-4 border-b border-zinc-800 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                    <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                </div>
+                <div>
+                    <h3 class="font-medium text-white">Active Players Detected</h3>
+                    <p class="text-xs text-zinc-500">Instance #<span x-text="safeModeInstance?.id"></span> has players</p>
+                </div>
+            </div>
+            <div class="p-4">
+                <div class="bg-zinc-800/50 rounded-lg p-4 mb-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-zinc-400">Current Status</span>
+                        <span class="text-sm font-medium" :class="getStatusColor(safeModeInstance?.status)" x-text="safeModeInstance?.status"></span>
+                    </div>
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-zinc-400">Players Online</span>
+                        <span class="text-sm font-bold text-orange-400" x-text="(safeModeInstance?.num_clients ?? safeModeInstance?.numClients ?? 0) + ' players'"></span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-zinc-400">Game Phase</span>
+                        <span class="text-sm" x-text="safeModeInstance?.game_phase || safeModeInstance?.gamePhase || 'Unknown'"></span>
+                    </div>
+                </div>
+                
+                <div class="text-sm text-zinc-400 mb-4">
+                    <p class="mb-2">
+                        <i class="fas fa-shield-alt text-blue-400 mr-2"></i>
+                        <strong>Safe Mode</strong> is protecting active players.
+                    </p>
+                    <p class="text-xs text-zinc-500">
+                        Choose how you want to proceed:
+                    </p>
+                </div>
+                
+                <div class="space-y-2">
+                    <!-- Sleep Option -->
+                    <button @click="sleepInstance(safeModeInstance?.id, safeModeAction)"
+                            class="w-full p-3 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-600/50 rounded-lg text-left transition-colors group">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-moon text-blue-400 text-lg"></i>
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-white">Sleep Mode</div>
+                                <div class="text-xs text-zinc-400">Wait for players to leave, then <span x-text="safeModeAction" class="text-blue-400"></span> automatically</div>
+                            </div>
+                            <i class="fas fa-chevron-right text-zinc-600 group-hover:text-zinc-400"></i>
+                        </div>
+                    </button>
+                    
+                    <!-- Force Option -->
+                    <button @click="forceAction()"
+                            class="w-full p-3 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-left transition-colors group">
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-bolt text-red-400 text-lg"></i>
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-white">Force <span x-text="safeModeAction" class="capitalize"></span></div>
+                                <div class="text-xs text-zinc-400">Execute immediately (players will be disconnected)</div>
+                            </div>
+                            <i class="fas fa-chevron-right text-zinc-600 group-hover:text-zinc-400"></i>
+                        </div>
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 border-t border-zinc-800">
+                <button @click="showSafeModeModal = false" 
+                        class="w-full px-3 py-2 bg-zinc-800 hover:bg-zinc-700 rounded text-sm transition-colors">
+                    Cancel
                 </button>
             </div>
         </div>
@@ -2983,6 +3265,18 @@
                 },
                 crashHistory: [],
                 crashProtectionLoading: false,
+                
+                // Safe Mode (Player Protection)
+                safeMode: {
+                    enabled: true,
+                    requireConfirmation: true,
+                    autoRestartWhenEmpty: true,
+                    strictMode: false  // false = protect when players > 0, true = protect only during active game
+                },
+                sleepingInstances: {},  // { instanceId: { pendingAction: 'stop'|'restart', waitingSince: timestamp } }
+                showSafeModeModal: false,
+                safeModeAction: null,
+                safeModeInstance: null,
                 
                 // Notifications & Alerts
                 notifications: [],
@@ -3428,7 +3722,28 @@
                     }
                 },
 
-                async stopInstance(instanceId) {
+                async stopInstance(instanceId, force = false) {
+                    const instance = this.getInstanceById(instanceId);
+                    
+                    // Check if safe mode is enabled and instance has players
+                    if (this.safeMode.enabled && !force && instance) {
+                        // strictMode = only protect during active game, otherwise protect when any players online
+                        const shouldProtect = this.safeMode.strictMode 
+                            ? this.isInGame(instance) 
+                            : (this.hasActivePlayers(instance) || this.isInGame(instance));
+                        
+                        if (shouldProtect) {
+                            // Show safe mode modal
+                            this.safeModeInstance = instance;
+                            this.safeModeAction = 'stop';
+                            this.showSafeModeModal = true;
+                            return;
+                        }
+                    }
+                    
+                    // Cancel any sleeping state
+                    delete this.sleepingInstances[instanceId];
+                    
                     this.controlLoading = true;
                     try {
                         const res = await this.apiCall(
@@ -3437,18 +3752,40 @@
                         );
                         const data = await res.json();
                         if (res.ok) {
+                            this.showToast(`Instance #${instanceId} stopped`, 'success');
                             await this.refreshServerDetails();
                         } else {
-                            alert(data.error || 'Failed to stop instance');
+                            this.showToast(data.error || 'Failed to stop instance', 'error');
                         }
                     } catch (err) {
-                        alert('Network error');
+                        this.showToast('Network error', 'error');
                     } finally {
                         this.controlLoading = false;
                     }
                 },
 
-                async restartInstance(instanceId) {
+                async restartInstance(instanceId, force = false) {
+                    const instance = this.getInstanceById(instanceId);
+                    
+                    // Check if safe mode is enabled and instance has players
+                    if (this.safeMode.enabled && !force && instance) {
+                        // strictMode = only protect during active game, otherwise protect when any players online
+                        const shouldProtect = this.safeMode.strictMode 
+                            ? this.isInGame(instance) 
+                            : (this.hasActivePlayers(instance) || this.isInGame(instance));
+                        
+                        if (shouldProtect) {
+                            // Show safe mode modal
+                            this.safeModeInstance = instance;
+                            this.safeModeAction = 'restart';
+                            this.showSafeModeModal = true;
+                            return;
+                        }
+                    }
+                    
+                    // Cancel any sleeping state
+                    delete this.sleepingInstances[instanceId];
+                    
                     this.controlLoading = true;
                     try {
                         const res = await this.apiCall(
@@ -3457,14 +3794,127 @@
                         );
                         const data = await res.json();
                         if (res.ok) {
+                            this.showToast(`Instance #${instanceId} restarted`, 'success');
                             await this.refreshServerDetails();
                         } else {
-                            alert(data.error || 'Failed to restart instance');
+                            this.showToast(data.error || 'Failed to restart instance', 'error');
                         }
                     } catch (err) {
-                        alert('Network error');
+                        this.showToast('Network error', 'error');
                     } finally {
                         this.controlLoading = false;
+                    }
+                },
+                
+                // Get instance by ID
+                getInstanceById(instanceId) {
+                    const instances = this.statusData?.instances || [];
+                    return instances.find(i => i.id === instanceId);
+                },
+                
+                // Put instance to sleep (wait for players to leave)
+                sleepInstance(instanceId, action) {
+                    this.sleepingInstances[instanceId] = {
+                        pendingAction: action,
+                        waitingSince: Date.now()
+                    };
+                    this.showSafeModeModal = false;
+                    this.showToast(`Instance #${instanceId} set to ${action} when empty`, 'info');
+                    
+                    // Start monitoring
+                    this.monitorSleepingInstance(instanceId);
+                },
+                
+                // Cancel sleep mode for instance
+                cancelSleep(instanceId) {
+                    delete this.sleepingInstances[instanceId];
+                    this.showToast(`Cancelled pending action for instance #${instanceId}`, 'info');
+                },
+                
+                // Check if instance should be protected based on safe mode settings
+                shouldProtectInstance(instance) {
+                    if (!instance) return false;
+                    if (this.safeMode.strictMode) {
+                        return this.isInGame(instance);
+                    }
+                    return this.hasActivePlayers(instance) || this.isInGame(instance);
+                },
+                
+                // Monitor sleeping instance
+                async monitorSleepingInstance(instanceId) {
+                    const checkInterval = 5000; // Check every 5 seconds
+                    
+                    const check = async () => {
+                        const sleep = this.sleepingInstances[instanceId];
+                        if (!sleep) return; // Cancelled
+                        
+                        const instance = this.getInstanceById(instanceId);
+                        if (!instance) {
+                            delete this.sleepingInstances[instanceId];
+                            return;
+                        }
+                        
+                        // Check if players have left (based on strictMode setting)
+                        if (!this.shouldProtectInstance(instance)) {
+                            const action = sleep.pendingAction;
+                            delete this.sleepingInstances[instanceId];
+                            
+                            this.showToast(`Instance #${instanceId} is now empty, executing ${action}...`, 'info');
+                            
+                            if (action === 'stop') {
+                                await this.stopInstance(instanceId, true);
+                            } else if (action === 'restart') {
+                                await this.restartInstance(instanceId, true);
+                            }
+                            return;
+                        }
+                        
+                        // Continue monitoring
+                        setTimeout(check, checkInterval);
+                    };
+                    
+                    // Start checking
+                    setTimeout(check, checkInterval);
+                },
+                
+                // Force action (bypass safe mode)
+                forceAction() {
+                    if (!this.safeModeInstance) return;
+                    
+                    const instanceId = this.safeModeInstance.id;
+                    const action = this.safeModeAction;
+                    
+                    this.showSafeModeModal = false;
+                    
+                    if (action === 'stop') {
+                        this.stopInstance(instanceId, true);
+                    } else if (action === 'restart') {
+                        this.restartInstance(instanceId, true);
+                    }
+                },
+                
+                // Check sleeping instances on refresh
+                checkSleepingInstances() {
+                    for (const [instanceId, sleep] of Object.entries(this.sleepingInstances)) {
+                        const instance = this.getInstanceById(parseInt(instanceId));
+                        if (!instance) {
+                            delete this.sleepingInstances[instanceId];
+                            continue;
+                        }
+                        
+                        // Check if players have left (based on strictMode setting)
+                        if (!this.shouldProtectInstance(instance)) {
+                            const action = sleep.pendingAction;
+                            delete this.sleepingInstances[instanceId];
+                            
+                            this.showToast(`Instance #${instanceId} is now empty, executing ${action}...`, 'info');
+                            
+                            if (action === 'stop') {
+                                this.stopInstance(parseInt(instanceId), true);
+                            } else if (action === 'restart') {
+                                this.restartInstance(parseInt(instanceId), true);
+                            }
+                        }
                     }
                 },
 
@@ -3999,9 +4449,50 @@
                     return this.controlLoading || this.isStatusAny(instance, 'ready', 'occupied');
                 },
 
-                // Check if stop button should be disabled
+                // Check if stop button should be disabled (with player protection)
                 isStopDisabled(instance) {
-                    return this.controlLoading || this.isStatusAny(instance, 'offline', 'stopped');
+                    if (this.controlLoading) return true;
+                    if (this.isStatusAny(instance, 'offline', 'stopped')) return true;
+                    return false; // Don't disable, but will show warning if players present
+                },
+                
+                // Check if restart button should be disabled
+                isRestartDisabled(instance) {
+                    if (this.controlLoading) return true;
+                    if (this.isStatusAny(instance, 'offline', 'stopped')) return true;
+                    return false;
+                },
+                
+                // Check if instance has active players
+                hasActivePlayers(instance) {
+                    const players = instance.num_clients ?? instance.numClients ?? 0;
+                    return players > 0;
+                },
+                
+                // Check if instance is in a game
+                isInGame(instance) {
+                    const status = (instance.status || '').toLowerCase();
+                    const phase = (instance.game_phase || instance.gamePhase || '').toLowerCase();
+                    return status === 'occupied' || 
+                           phase === 'playing' || 
+                           phase === 'in game' || 
+                           phase === 'ingame' || 
+                           phase === 'active' ||
+                           phase === 'picking' ||
+                           phase === 'banning' ||
+                           phase === 'loading';
+                },
+                
+                // Check if instance is sleeping (waiting for players to leave)
+                isSleeping(instanceId) {
+                    return !!this.sleepingInstances[instanceId];
+                },
+                
+                // Get sleep status text
+                getSleepStatus(instanceId) {
+                    const sleep = this.sleepingInstances[instanceId];
+                    if (!sleep) return null;
+                    return sleep.pendingAction === 'stop' ? 'Waiting to Stop' : 'Waiting to Restart';
                 },
 
                 getPhaseClass(phase) {
@@ -5482,6 +5973,19 @@
                                 await this.handleSayCommand(args, cmd);
                                 break;
                                 
+                            case 'sleep':
+                                await this.handleSleepCommand(args);
+                                break;
+                                
+                            case 'wake':
+                            case 'cancel':
+                                this.handleWakeCommand(args);
+                                break;
+                                
+                            case 'sleeping':
+                                this.handleSleepingCommand();
+                                break;
+
                             default:
                                 // Send to server as raw command
                                 await this.sendRawConsoleCommand(cmd);
@@ -5720,6 +6224,116 @@
                     } else {
                         this.addConsoleLog('✗ Failed to send message', 'error');
                     }
+                },
+
+                async handleSleepCommand(args) {
+                    if (args.length < 2) {
+                        this.addConsoleLog('Usage: sleep [instance_id] [action]', 'warning');
+                        this.addConsoleLog('Actions: stop, restart', 'info');
+                        this.addConsoleLog('Example: sleep 1 stop', 'info');
+                        this.addConsoleLog('Example: sleep 2 restart', 'info');
+                        return;
+                    }
+                    
+                    const id = parseInt(args[0]);
+                    const action = args[1].toLowerCase();
+                    
+                    if (isNaN(id)) {
+                        this.addConsoleLog(`Invalid instance ID: ${args[0]}`, 'error');
+                        return;
+                    }
+                    
+                    if (action !== 'stop' && action !== 'restart') {
+                        this.addConsoleLog(`Invalid action: ${action}. Use 'stop' or 'restart'`, 'error');
+                        return;
+                    }
+                    
+                    const instance = this.getInstanceById(id);
+                    if (!instance) {
+                        this.addConsoleLog(`Instance #${id} not found`, 'error');
+                        return;
+                    }
+                    
+                    // Check if instance has players
+                    if (!this.shouldProtectInstance(instance)) {
+                        this.addConsoleLog(`Instance #${id} has no active players, executing ${action} immediately...`, 'info');
+                        if (action === 'stop') {
+                            await this.handleStopCommand([id.toString()]);
+                        } else {
+                            await this.handleRestartCommand([id.toString()]);
+                        }
+                        return;
+                    }
+                    
+                    // Put instance to sleep
+                    const players = instance.num_clients ?? instance.numClients ?? 0;
+                    this.sleepingInstances[id] = {
+                        pendingAction: action,
+                        waitingSince: new Date().toISOString()
+                    };
+                    this.monitorSleepingInstance(id);
+                    
+                    this.addConsoleLog(`<span class="text-blue-400">☽</span> Instance #${id} is now sleeping`, 'success');
+                    this.addConsoleLog(`  Action: <span class="${action === 'stop' ? 'text-red-400' : 'text-orange-400'}">${action}</span>`, 'output');
+                    this.addConsoleLog(`  Players: <span class="text-yellow-400">${players}</span> online`, 'output');
+                    this.addConsoleLog(`  Will ${action} when all players leave`, 'info');
+                },
+
+                handleWakeCommand(args) {
+                    if (args.length === 0) {
+                        // Cancel all sleeping
+                        const count = Object.keys(this.sleepingInstances).length;
+                        if (count === 0) {
+                            this.addConsoleLog('No sleeping instances to cancel', 'info');
+                            return;
+                        }
+                        
+                        for (const id of Object.keys(this.sleepingInstances)) {
+                            delete this.sleepingInstances[id];
+                        }
+                        this.addConsoleLog(`✓ Cancelled all ${count} sleeping instances`, 'success');
+                        return;
+                    }
+                    
+                    const id = parseInt(args[0]);
+                    if (isNaN(id)) {
+                        this.addConsoleLog(`Invalid instance ID: ${args[0]}`, 'error');
+                        return;
+                    }
+                    
+                    if (!this.sleepingInstances[id]) {
+                        this.addConsoleLog(`Instance #${id} is not sleeping`, 'warning');
+                        return;
+                    }
+                    
+                    const action = this.sleepingInstances[id].pendingAction;
+                    delete this.sleepingInstances[id];
+                    this.addConsoleLog(`✓ Cancelled ${action} for instance #${id}`, 'success');
+                },
+
+                handleSleepingCommand() {
+                    const sleeping = Object.entries(this.sleepingInstances);
+                    
+                    if (sleeping.length === 0) {
+                        this.addConsoleLog('No sleeping instances', 'info');
+                        this.addConsoleLog('Use: sleep [id] [stop|restart] to queue an action', 'info');
+                        return;
+                    }
+                    
+                    this.addConsoleLog(`─── Sleeping Instances (${sleeping.length}) ───`, 'info');
+                    this.addConsoleLog('  ID   ACTION    WAITING SINCE', 'output');
+                    this.addConsoleLog('  ──   ──────    ─────────────', 'output');
+                    
+                    for (const [id, info] of sleeping) {
+                        const instance = this.getInstanceById(parseInt(id));
+                        const players = instance ? (instance.num_clients ?? instance.numClients ?? 0) : '?';
+                        const action = `<span class="${info.pendingAction === 'stop' ? 'text-red-400' : 'text-orange-400'}">${info.pendingAction.padEnd(9)}</span>`;
+                        const since = new Date(info.waitingSince).toLocaleTimeString();
+                        this.addConsoleLog(`  ${String(id).padEnd(4)} ${action} ${since} <span class="text-zinc-500">(${players} players)</span>`, 'output');
+                    }
+                    
+                    this.addConsoleLog('', 'output');
+                    this.addConsoleLog('Use: wake [id] to cancel, or wake to cancel all', 'info');
                 },
 
                 async sendRawConsoleCommand(command) {
